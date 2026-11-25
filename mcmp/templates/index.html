@@ -89,24 +89,31 @@
           <h2 id="device-title">Este navegador</h2>
           <p id="device-name" class="device-name">Sin vincular</p>
           <p id="device-help" class="muted"></p>
+          <p id="pair-success" class="feedback device-feedback" role="status"></p>
           <details id="device-pair">
             <summary>Vincular navegador</summary>
             <form id="pair-form" class="stack">
-              <label>Código del agente<input name="code" maxlength="128" spellcheck="false" autocomplete="off" required></label>
-              <p class="muted">Ejecuta <code>mcmp agent pair</code> en este PC.</p>
+              <p id="pair-help" class="muted">Genera el código en este PC con <code>mcmp agent pair</code>. Para la prueba local, ejecuta <code>./scripts/deploy-local.sh pair</code> en otra terminal.</p>
+              <div>
+                <label>Código de vinculación<input name="code" maxlength="128" spellcheck="false" autocomplete="off" aria-describedby="pair-help pair-feedback" required></label>
+                <p id="pair-feedback" class="feedback device-feedback" role="status"></p>
+              </div>
               <button>Vincular</button>
             </form>
           </details>
           <details data-admin-only hidden>
             <summary>Registrar un PC Linux</summary>
-            <p class="muted">Genera un código e introdúcelo cuando el agente ejecute <code>mcmp agent enroll</code>.</p>
+            <p class="muted">Genera un código y pégalo en la terminal del PC cuando <code>mcmp agent enroll</code> lo pida.</p>
             <button id="enrollment" type="button">Generar código de registro</button>
-            <div id="enrollment-wrap" class="token-field" hidden>
-              <code id="enrollment-code"></code>
-              <button id="copy-enrollment" type="button">Copiar</button>
+            <div id="enrollment-wrap" hidden>
+              <div class="token-field">
+                <code id="enrollment-code"></code>
+                <button id="copy-enrollment" type="button">Copiar</button>
+              </div>
+              <p class="enrollment-expiry">Válido durante 10 minutos y para un solo registro.</p>
             </div>
+            <p id="enrollment-feedback" class="feedback device-feedback" role="status"></p>
           </details>
-          <p id="device-feedback" class="feedback" role="status"></p>
         </section>
       </div>
 

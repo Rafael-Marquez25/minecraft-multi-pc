@@ -20,9 +20,24 @@ usage() {
     printf 'Uso: %s [--port PUERTO] [--java EJECUTABLE]\n       %s pair\n' "$0" "$0"
 }
 
+pairing_step() {
+    if [[ -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
+        printf '\n\033[1;33m%s\033[0m\n' "$1" >&2
+    else
+        printf '\n%s\n' "$1" >&2
+    fi
+    shift
+    printf '  %s\n' "$@" >&2
+}
+
+show_pairing_code() {
+    pairing_step "$1" 'En la web, abre «Vincular navegador» o «Cambiar vinculación» y pega el código que aparece abajo.'
+    mcmp agent pair --state-dir "$state"
+}
+
 if [[ ${1:-} == pair && $# -eq 1 ]]; then
     [[ -x $python && -f $state/agent.json ]] || die 'Primero inicia la prueba y registra el agente.'
-    mcmp agent pair --state-dir "$state"
+    show_pairing_code 'Vincular el navegador'
     exit
 fi
 
@@ -81,10 +96,11 @@ printf '\nPanel: %s/\nUsuario: admin\nCA para importar en el navegador: %s/ca.pe
 
 if [[ ! -f $state/agent.json ]]; then
     [[ -t 0 ]] || die 'Abre una terminal interactiva para registrar el agente.'
-    printf 'Genera un código en «Registrar un PC Linux». Pégalo y pulsa Intro. El código no aparece al pegarlo.\n'
+    pairing_step '1. Registrar el PC' \
+        'En la web, abre «Registrar un PC Linux» y genera un código.' \
+        'Pégalo en esta terminal y pulsa Intro. El código no aparece al pegarlo.'
     mcmp agent enroll --state-dir "$state" --url "$url" --ca "$tls/ca.pem"
-    printf 'Introduce este código en «Vincular navegador»:\n'
-    mcmp agent pair --state-dir "$state"
+    show_pairing_code '2. Vincular el navegador'
 fi
 
 "$python" -I - "$data" "$state/agent.json" "$network" "$bind" <<'PY'

@@ -148,8 +148,33 @@ code { font-family: "IBM Plex Mono", ui-monospace, monospace; overflow-wrap: any
 summary { cursor: pointer; color: var(--copy); font-weight: 600; }
 details[open] > summary { margin-bottom: .7rem; }
 details > button, .token-field { margin-top: .65rem; }
-.token-field { display: flex; align-items: center; gap: .35rem; justify-content: space-between; }
-.token-field code { color: var(--mint); }
+.device details.pairing-needed {
+  padding: .65rem .75rem;
+  border: 1px solid #846c4b;
+  border-radius: .45rem;
+  background: #302a24;
+}
+.pairing-needed > summary { color: var(--accent); }
+.device-feedback:not(:empty) {
+  padding: .5rem .65rem;
+  border-inline-start: 3px solid currentColor;
+  border-radius: .3rem;
+  background: #192b27;
+}
+.device-feedback.error:not(:empty) { background: #392a2c; }
+.token-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .4rem .65rem;
+  padding: .5rem .65rem;
+  border: 1px solid #846c4b;
+  border-radius: .45rem;
+  background: var(--field);
+}
+.token-field code { min-inline-size: 0; color: var(--accent); font-size: 1rem; }
+.enrollment-expiry { margin-top: .4rem; color: var(--accent); font-size: .87rem; }
 .section-heading { margin-bottom: 1rem; }
 .section-heading p { margin-top: .35rem; }
 .stack { display: grid; gap: .7rem; }

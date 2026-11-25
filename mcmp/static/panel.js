@@ -14,6 +14,8 @@ const consoleOutput = byId("console-output");
 const commandForm = byId("console-command");
 const commandInput = commandForm.elements.command;
 const commandButton = commandForm.querySelector("button");
+const pairDetails = byId("device-pair");
+const pairForm = byId("pair-form");
 
 const states = {
   idle: ["Parado", "Inicia la partida en el PC vinculado a este navegador."],
@@ -214,6 +216,11 @@ function showLogin() {
   byId("loading").hidden = true;
   byId("enrollment-wrap").hidden = true;
   byId("enrollment-code").textContent = "";
+  pairForm.reset();
+  pairDetails.open = false;
+  feedback("pair-success");
+  feedback("pair-feedback");
+  feedback("enrollment-feedback");
   adminOnly.forEach((element) => { element.hidden = true; });
   userForm.reset();
   feedback("user-feedback");
@@ -276,7 +283,8 @@ function render(data) {
   byId("device-help").textContent = paired
     ? (paired.online ? "Agente conectado" : "Agente sin conexión") + (paired.address ? " · " + paired.address : "")
     : "Vincula este navegador para ejecutar Minecraft en su PC.";
-  byId("device-pair").querySelector("summary").textContent = paired ? "Cambiar vinculación" : "Vincular navegador";
+  pairDetails.classList.toggle("pairing-needed", !paired);
+  pairDetails.querySelector("summary").textContent = paired ? "Cambiar vinculación" : "Vincular navegador";
 
   if (admin) renderAdministration(data);
 }
@@ -423,25 +431,30 @@ action(recoverForm, "submit", "recover-feedback", async () => {
   feedback("game-feedback", "Reserva liberada. Ya puedes iniciar desde otro PC.");
 });
 
-action(byId("pair-form"), "submit", "device-feedback", async () => {
-  const form = byId("pair-form");
-  await api("/pair", "POST", { code: form.elements.code.value.trim() });
-  form.reset();
-  byId("device-pair").open = false;
+action(pairForm, "submit", "pair-feedback", async () => {
+  feedback("pair-success");
+  try {
+    await api("/pair", "POST", { code: pairForm.elements.code.value.trim() });
+  } catch (error) {
+    if (error.status === 400) error.message += " Genera otro código en este PC y vuelve a intentarlo.";
+    throw error;
+  }
+  pairForm.reset();
+  pairDetails.open = false;
   await refresh();
   if (status?.role === "admin") {
     addressDirty = false;
     addressSelect.value = status.paired;
     fillAddress();
   }
-  feedback("device-feedback", "Navegador vinculado.");
+  if (status) feedback("pair-success", "Navegador vinculado.");
 });
 
-action(byId("enrollment"), "click", "device-feedback", async () => {
+action(byId("enrollment"), "click", "enrollment-feedback", async () => {
   const { code } = await api("/enrollment-code", "POST");
   byId("enrollment-code").textContent = code;
   byId("enrollment-wrap").hidden = false;
-  feedback("device-feedback", "Código válido durante 10 minutos y para un solo registro.");
+  feedback("enrollment-feedback", "Código de registro generado.");
 });
 
 function copy(button, source, messageId) {
@@ -451,7 +464,7 @@ function copy(button, source, messageId) {
   });
 }
 copy("copy-endpoint", "endpoint", "game-feedback");
-copy("copy-enrollment", "enrollment-code", "device-feedback");
+copy("copy-enrollment", "enrollment-code", "enrollment-feedback");
 
 action(userForm, "submit", "user-feedback", async () => {
   const { password, confirmation } = userForm.elements;
