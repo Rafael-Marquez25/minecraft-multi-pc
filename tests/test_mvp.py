@@ -19,6 +19,7 @@ from mcmp.web import create_app
 NETWORK = IPv4Network("127.0.0.0/8")
 API = "/api/v1"
 PASSWORD = "a long test password"
+USER_PASSWORD = "a different test password"
 
 
 @pytest.fixture
@@ -30,8 +31,8 @@ def panel(tmp_path):
         yield app, client
 
 
-def sign_in(client):
-    assert client.post(f"{API}/login", json={"name": "admin", "password": PASSWORD}).status_code == 200
+def sign_in(client, name="admin", password=PASSWORD):
+    assert client.post(f"{API}/login", json={"name": name, "password": password}).status_code == 200
     client.headers["X-CSRF-Token"] = client.get(f"{API}/status").json()["csrf"]
 
 
@@ -90,6 +91,134 @@ def test_dashboard_login_cookies_and_csrf(panel):
         sign_in(anonymous)
         anonymous.headers.pop("X-CSRF-Token")
         assert anonymous.post(f"{API}/enrollment-code").status_code == 403
+
+
+def test_user_can_play_and_read_console_but_cannot_manage_the_server(panel, tmp_path):
+    app, admin = panel
+    settings = configure(admin)
+    admin_host, admin_auth = enroll(admin, "PC del admin", "127.0.0.2")
+    code = admin.post(f"{API}/enrollment-code").json()["code"]
+    agent = admin.post(f"{API}/agents/enroll", json={"code": code, "name": "PC de user"}).json()
+    auth = {"Authorization": f'Bearer {agent["token"]}'}
+    pairing = admin.post(f"{API}/agents/pairing-code", headers=auth).json()
+    path = f"{API}/accounts/user"
+    assert admin.put(path, json={"password": USER_PASSWORD}).status_code == 200
+    assert admin.get(f"{API}/status").json()["user_configured"] is True
+
+    with TestClient(app, base_url="https://testserver") as user:
+        sign_in(user, "user", USER_PASSWORD)
+        state = user.get(f"{API}/status").json()
+        assert state["role"] == "user"
+        assert state["agents"] == []
+        assert state["settings"] == {"version": settings["version"], "eula": True}
+        assert "network" not in state and "user_configured" not in state
+        assert user.post(f"{API}/start").status_code == 409
+        assert user.post(f"{API}/pair", json=pairing).status_code == 409
+        address = f'{API}/agents/{agent["id"]}/address'
+        assert admin.put(address, json={"address": "127.0.0.3"}).status_code == 200
+        assert user.post(f"{API}/pair", json=pairing).status_code == 200
+        assert user.post(f"{API}/start").status_code == 409
+        poll = f"{API}/agents/poll"
+        assert admin.post(poll, headers=auth).status_code == 200
+        assert user.post(f"{API}/start", headers={"X-CSRF-Token": ""}).status_code == 403
+        started = user.post(f"{API}/start")
+        assert started.status_code == 202
+        assert [host["id"] for host in started.json()["agents"]] == [agent["id"]]
+        run = f'{API}/runs/{started.json()["run_id"]}'
+        assert event(admin, started.json()["run_id"], auth, "claim").status_code == 200
+        assert event(admin, started.json()["run_id"], auth, "ready").status_code == 200
+        assert admin.post(poll, headers=auth, json={}).status_code == 200
+        assert admin.put(f"{run}/console?offset=0", headers=auth, content=b"Done!").status_code == 200
+        state = user.get(f"{API}/status").json()
+        assert state["run"]["endpoint"] == "127.0.0.3:25565"
+        assert state["console"]["commands"] is False
+        assert user.get(f"{run}/console").content == b"Done!"
+
+        command = admin.post(f"{run}/commands", json={"command": "list"})
+        assert command.status_code == 202
+        for method, route, body in [
+            ("PUT", path, {"password": PASSWORD}),
+            ("PUT", f"{API}/settings", settings),
+            ("PUT", address, {"address": "127.0.0.4"}),
+            ("POST", f"{API}/enrollment-code", None),
+            ("POST", f"{run}/recover", {"confirmed": True}),
+            ("POST", f"{run}/commands", {"command": "stop"}),
+            ("GET", f'{run}/commands/{command.json()["id"]}', None),
+        ]:
+            assert user.request(method, route, json=body).status_code == 403, route
+
+        assert user.post(f"{run}/stop").status_code == 202
+        assert event(admin, started.json()["run_id"], auth, "saving").status_code == 200
+        content = make_world(tmp_path)
+        assert admin.put(f"{run}/snapshot", content=content, headers=upload_headers(content, auth)).status_code == 200
+        assert user.get(f"{API}/status").json()["saved_at"] is not None
+        assert user.get(f"{run}/console").content == b"Done!"
+
+        admin_started = admin.post(f"{API}/start").json()
+        assert admin_started["run"]["agent"] == admin_host
+        second = admin_started["run_id"]
+        assert event(admin, second, admin_auth, "claim").status_code == 200
+        assert event(admin, second, admin_auth, "ready").status_code == 200
+        assert user.post(f"{API}/runs/{second}/stop").status_code == 202
+
+
+def test_user_password_reset_keeps_pairings_separate_and_revokes_old_sessions(panel):
+    app, admin = panel
+    host, auth = enroll(admin, "PC compartido", "127.0.0.2")
+    path = f"{API}/accounts/user"
+    assert admin.get(f"{API}/status").json()["user_configured"] is False
+    assert admin.put(path, json={"password": "short"}).status_code == 422
+    assert admin.put(path, json={"password": USER_PASSWORD}, headers={"X-CSRF-Token": ""}).status_code == 403
+    assert admin.put(path, json={"password": USER_PASSWORD}).status_code == 200
+    pairing = admin.post(f"{API}/agents/pairing-code", headers=auth).json()
+    with TestClient(app, base_url="https://testserver") as other_admin:
+        sign_in(other_admin)
+        sign_in(admin, "user", USER_PASSWORD)
+        assert admin.get(f"{API}/status").json()["paired"] is None
+        assert admin.post(f"{API}/pair", json=pairing).status_code == 200
+        assert admin.get(f"{API}/status").json()["paired"] == host
+        with TestClient(app, base_url="https://testserver") as second_session:
+            sign_in(second_session, "user", USER_PASSWORD)
+            assert other_admin.put(path, json={"password": PASSWORD}).status_code == 200
+            assert second_session.get(f"{API}/status").status_code == 401
+        assert admin.get(f"{API}/status").status_code == 401
+        assert admin.post(f"{API}/login", json={"name": "user", "password": USER_PASSWORD}).status_code == 401
+        sign_in(admin)
+        assert admin.get(f"{API}/status").json()["paired"] == host
+        sign_in(admin, "user", PASSWORD)
+        assert admin.get(f"{API}/status").json()["paired"] == host
+
+
+def test_existing_database_keeps_admin_access_settings_and_world(panel, tmp_path):
+    app, client = panel
+    settings = configure(client)
+    host, auth = enroll(client, "PC existente", "127.0.0.2")
+    saved = client.post(f"{API}/start").json()["run_id"]
+    assert event(client, saved, auth, "claim").status_code == 200
+    assert event(client, saved, auth, "saving").status_code == 200
+    content = make_world(tmp_path)
+    assert client.put(
+        f"{API}/runs/{saved}/snapshot", content=content, headers=upload_headers(content, auth),
+    ).status_code == 200
+
+    with app.state.store.connection(write=True) as db:
+        db.execute("ALTER TABLE accounts DROP COLUMN role")
+        db.execute("INSERT INTO accounts (name, password) SELECT 'user', password FROM accounts WHERE name = 'admin'")
+
+    restarted = create_app(tmp_path / "coordinator", NETWORK)
+    with TestClient(restarted, base_url="https://testserver") as browser:
+        browser.cookies.update(client.cookies)
+        browser.headers["X-CSRF-Token"] = client.headers["X-CSRF-Token"]
+        state = browser.get(f"{API}/status").json()
+        assert state["role"] == "admin"
+        assert state["settings"] == settings
+        assert state["paired"] == host
+        assert state["saved_at"] is not None
+        assert browser.put(f"{API}/accounts/user", json={"password": USER_PASSWORD}).status_code == 409
+        run = browser.post(f"{API}/start").json()["run_id"]
+        assert browser.get(f"{API}/runs/{run}/snapshot", headers=auth).content == content
+        sign_in(browser, "user")
+        assert browser.get(f"{API}/status").json()["role"] == "admin"
 
 
 def test_two_browsers_concurrent_start_stop_and_restore(panel, tmp_path):

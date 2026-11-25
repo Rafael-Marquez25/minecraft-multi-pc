@@ -27,11 +27,16 @@ from .store import BROWSER_AGE, SESSION_AGE, Problem, Store
 HERE = Path(__file__).parent
 SESSION_COOKIE = "__Host-mcmp-session"
 BROWSER_COOKIE = "__Host-mcmp-browser"
+USER_BROWSER_COOKIE = "__Host-mcmp-user-browser"
 
 
 class Credentials(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
+
+
+class UserPassword(BaseModel):
+    password: str = Field(min_length=12, max_length=256)
 
 
 class Code(BaseModel):
@@ -121,6 +126,17 @@ def create_app(directory: Path, network: IPv4Network) -> FastAPI:
             raise Problem("La sesión no es válida para esta acción.", 403)
         return row
 
+    def admin_session(row=Depends(session)):
+        if row["role"] != "admin":
+            raise Problem("Esta acción requiere una cuenta de administración.", 403)
+        return row
+
+    def admin_edit(row=Depends(edit)):
+        return admin_session(row)
+
+    def browser_cookie(row) -> str:
+        return BROWSER_COOKIE if row["role"] == "admin" else USER_BROWSER_COOKIE
+
     def agent(request: Request):
         scheme, _, key = request.headers.get("Authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not key:
@@ -164,39 +180,52 @@ def create_app(directory: Path, network: IPv4Network) -> FastAPI:
 
     @app.get(f"{API_PREFIX}/status")
     def status(request: Request, row=Depends(session)):
-        overview = store.overview(row["account"], request.cookies.get(BROWSER_COOKIE, ""))
+        overview = store.overview(
+            row["account"], request.cookies.get(browser_cookie(row), ""), admin=row["role"] == "admin",
+        )
         if overview["state"] == "saving":
             with upload_lock:
                 if overview["run"]["id"] == upload_run:
                     overview["progress"] = upload_activity.copy()
-        return {**overview, "csrf": row["csrf"], "user": row["name"]}
+        return {**overview, "csrf": row["csrf"], "user": row["name"], "role": row["role"]}
+
+    @app.put(f"{API_PREFIX}/accounts/user")
+    def user_password(values: UserPassword, row=Depends(admin_edit)):
+        store.set_user_password(values.password)
+        return {"ok": True}
 
     @app.put(f"{API_PREFIX}/settings")
-    def settings(values: Settings, row=Depends(edit)):
+    def settings(values: Settings, row=Depends(admin_edit)):
         store.update_settings(values)
         return {"ok": True}
 
     @app.put(f"{API_PREFIX}/agents/{{agent_id}}/address")
-    def address(agent_id: UUID, values: Address, row=Depends(edit)):
+    def address(agent_id: UUID, values: Address, row=Depends(admin_edit)):
         store.set_address(str(agent_id), str(values.address))
         return {"ok": True}
 
     @app.post(f"{API_PREFIX}/enrollment-code")
-    def enrollment_code(row=Depends(edit)):
+    def enrollment_code(row=Depends(admin_edit)):
         return {"code": store.create_code("enroll")}
 
     @app.post(f"{API_PREFIX}/pair")
     def pair(request: Request, response: Response, values: Code, row=Depends(edit)):
-        browser = store.pair(row["account"], request.cookies.get(BROWSER_COOKIE, ""), values.code)
-        set_cookie(response, BROWSER_COOKIE, browser, BROWSER_AGE)
+        cookie = browser_cookie(row)
+        browser = store.pair(
+            row["account"], request.cookies.get(cookie, ""), values.code, require_configured=row["role"] == "user",
+        )
+        set_cookie(response, cookie, browser, BROWSER_AGE)
         return {"ok": True}
 
     @app.post(f"{API_PREFIX}/start")
     def start(request: Request, response: Response, row=Depends(edit)):
-        browser = request.cookies.get(BROWSER_COOKIE, "")
+        browser = request.cookies.get(browser_cookie(row), "")
         run, created = store.start(row["account"], browser)
         response.status_code = 202 if created else 200
-        return {**store.overview(row["account"], browser), "run_id": run, "created": created}
+        return {
+            **store.overview(row["account"], browser, admin=row["role"] == "admin"),
+            "run_id": run, "created": created,
+        }
 
     @app.post(f"{API_PREFIX}/runs/{{run_id}}/stop", status_code=202)
     def stop(run_id: UUID, row=Depends(edit)):
@@ -204,7 +233,7 @@ def create_app(directory: Path, network: IPv4Network) -> FastAPI:
         return {"ok": True}
 
     @app.post(f"{API_PREFIX}/runs/{{run_id}}/recover")
-    def recover(run_id: UUID, values: Recovery, row=Depends(edit)):
+    def recover(run_id: UUID, values: Recovery, row=Depends(admin_edit)):
         store.recover(str(run_id))
         return {"ok": True}
 
@@ -241,7 +270,7 @@ def create_app(directory: Path, network: IPv4Network) -> FastAPI:
         return {"offset": size}
 
     @app.post(f"{API_PREFIX}/runs/{{run_id}}/commands", status_code=202)
-    def command(run_id: UUID, values: Command, row=Depends(edit)):
+    def command(run_id: UUID, values: Command, row=Depends(admin_edit)):
         line = values.command.strip().removeprefix("/").lstrip()
         if not line:
             raise Problem("Escribe un comando de Minecraft.", 400)
@@ -254,7 +283,7 @@ def create_app(directory: Path, network: IPv4Network) -> FastAPI:
         return {"id": store.queue_command(str(run_id), line)}
 
     @app.get(f"{API_PREFIX}/runs/{{run_id}}/commands/{{command_id}}")
-    def command_status(run_id: UUID, command_id: UUID, row=Depends(session)):
+    def command_status(run_id: UUID, command_id: UUID, row=Depends(admin_session)):
         return {"status": store.command_status(str(run_id), str(command_id))}
 
     @app.post(f"{API_PREFIX}/runs/{{run_id}}/events")

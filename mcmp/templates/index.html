@@ -76,11 +76,11 @@
               </div>
               <pre id="console-output" tabindex="0" aria-label="Salida de Minecraft"></pre>
               <p id="console-connection" class="feedback" role="status" hidden></p>
-              <form id="console-command" class="console-command" autocomplete="off">
+              <form id="console-command" class="console-command" autocomplete="off" data-admin-only hidden>
                 <input name="command" aria-label="Comando de Minecraft" placeholder="Ejemplo: list" maxlength="1024" spellcheck="false" required disabled>
                 <button type="submit" disabled>Enviar</button>
               </form>
-              <p id="command-feedback" class="feedback" role="status"></p>
+              <p id="command-feedback" class="feedback" role="status" data-admin-only hidden></p>
             </div>
           </details>
         </section>
@@ -97,7 +97,7 @@
               <button>Vincular</button>
             </form>
           </details>
-          <details>
+          <details data-admin-only hidden>
             <summary>Registrar un PC Linux</summary>
             <p class="muted">Genera un código e introdúcelo cuando el agente ejecute <code>mcmp agent enroll</code>.</p>
             <button id="enrollment" type="button">Generar código de registro</button>
@@ -110,7 +110,7 @@
         </section>
       </div>
 
-      <div class="settings-grid">
+      <div class="settings-grid" data-admin-only hidden>
         <section class="surface" aria-labelledby="settings-title">
           <div class="section-heading">
             <h2 id="settings-title">Ajustes de la partida</h2>
@@ -136,19 +136,34 @@
           </form>
         </section>
 
-        <section class="surface network" aria-labelledby="network-title">
-          <div class="section-heading">
-            <h2 id="network-title">Red de los anfitriones</h2>
-            <p class="muted" id="network-range"></p>
-          </div>
-          <p id="no-agents" class="muted">Registra un PC Linux para configurar su dirección.</p>
-          <form id="address-form" class="stack" hidden>
-            <label>PC anfitrión<select name="agent" required></select></label>
-            <label>IPv4 del PC en la VPN<input name="address" maxlength="15" inputmode="decimal" autocomplete="off" spellcheck="false" required></label>
-            <button>Guardar dirección</button>
-          </form>
-          <p id="network-feedback" class="feedback" role="status"></p>
-        </section>
+        <div class="stack">
+          <section class="surface network" aria-labelledby="network-title">
+            <div class="section-heading">
+              <h2 id="network-title">Red de los anfitriones</h2>
+              <p class="muted" id="network-range"></p>
+            </div>
+            <p id="no-agents" class="muted">Registra un PC Linux para configurar su dirección.</p>
+            <form id="address-form" class="stack" hidden>
+              <label>PC anfitrión<select name="agent" required></select></label>
+              <label>IPv4 del PC en la VPN<input name="address" maxlength="15" inputmode="decimal" autocomplete="off" spellcheck="false" required></label>
+              <button>Guardar dirección</button>
+            </form>
+            <p id="network-feedback" class="feedback" role="status"></p>
+          </section>
+
+          <section class="surface" aria-labelledby="user-title">
+            <div class="section-heading">
+              <h2 id="user-title">Cuenta <code>user</code></h2>
+              <p id="user-help" class="muted"></p>
+            </div>
+            <form id="user-form" class="stack" method="post">
+              <label>Nueva contraseña<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>
+              <label>Repite la contraseña<input name="confirmation" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>
+              <button>Crear cuenta</button>
+              <p id="user-feedback" class="feedback" role="status"></p>
+            </form>
+          </section>
+        </div>
       </div>
     </div>
   </main>

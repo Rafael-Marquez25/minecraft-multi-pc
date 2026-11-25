@@ -70,6 +70,7 @@ code { font-family: "IBM Plex Mono", ui-monospace, monospace; overflow-wrap: any
   margin-top: 1rem;
 }
 .overview-grid { margin-top: 1.5rem; }
+.settings-grid { align-items: start; }
 .surface { padding: clamp(1rem, 3vw, 1.5rem); background: var(--panel); border: 1px solid var(--line); border-radius: .65rem; }
 .login { max-width: 27rem; margin: 2rem auto; }
 .login h1 { margin-bottom: 1.25rem; font-size: 1.9rem; }

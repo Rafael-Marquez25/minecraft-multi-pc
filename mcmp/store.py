@@ -21,7 +21,8 @@ CODE_AGE = 10 * 60
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, password TEXT NOT NULL
+    id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'user'))
 );
 CREATE TABLE IF NOT EXISTS sessions (
     digest TEXT PRIMARY KEY, account INTEGER NOT NULL REFERENCES accounts(id),
@@ -86,6 +87,13 @@ class Store:
         with closing(sqlite3.connect(self.database, timeout=10, isolation_level=None)) as db:
             db.execute("PRAGMA journal_mode = WAL")
             db.executescript(SCHEMA)
+        with self.connection(write=True) as db:
+            columns = db.execute("PRAGMA table_info(accounts)").fetchall()
+            if not any(column["name"] == "role" for column in columns):
+                db.execute(
+                    "ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'admin' "
+                    "CHECK (role IN ('admin', 'user'))"
+                )
             db.execute(
                 "INSERT OR IGNORE INTO instance (id, settings) VALUES (1, ?)",
                 (Settings().model_dump_json(),),
@@ -107,15 +115,36 @@ class Store:
             db.close()
 
     def add_account(self, name: str, password: str) -> None:
-        if not 1 <= len(name) <= 64 or not 12 <= len(password) <= 256:
-            raise Problem("Usa un nombre de hasta 64 caracteres y una contraseña de 12 a 256 caracteres.", 400)
-        salt = secrets.token_hex(16)
-        hashed = f"{salt}:{password_hash(password, salt)}"
+        if not 1 <= len(name) <= 64:
+            raise Problem("Usa un nombre de 1 a 64 caracteres.", 400)
+        if name == "user":
+            raise Problem("Crea la cuenta user desde el panel de administración.", 400)
+        hashed = self.hash_new_password(password)
         with self.connection(write=True) as db:
             try:
                 db.execute("INSERT INTO accounts (name, password) VALUES (?, ?)", (name, hashed))
             except sqlite3.IntegrityError as error:
                 raise Problem("Ya existe una cuenta con ese nombre.") from error
+
+    @staticmethod
+    def hash_new_password(password: str) -> str:
+        if not 12 <= len(password) <= 256:
+            raise Problem("Usa una contraseña de 12 a 256 caracteres.", 400)
+        salt = secrets.token_hex(16)
+        return f"{salt}:{password_hash(password, salt)}"
+
+    def set_user_password(self, password: str) -> None:
+        hashed = self.hash_new_password(password)
+        with self.connection(write=True) as db:
+            account = db.execute(
+                "INSERT INTO accounts (name, password, role) VALUES ('user', ?, 'user') "
+                "ON CONFLICT(name) DO UPDATE SET password = excluded.password "
+                "WHERE accounts.role = 'user' RETURNING id",
+                (hashed,),
+            ).fetchone()
+            if account is None:
+                raise Problem("Ya existe una cuenta de administración llamada user.")
+            db.execute("DELETE FROM sessions WHERE account = ?", (account["id"],))
 
     def login(self, name: str, password: str) -> str:
         with self.connection() as db:
@@ -128,16 +157,18 @@ class Store:
         now = time.time()
         with self.connection(write=True) as db:
             db.execute("DELETE FROM sessions WHERE expires < ?", (now,))
-            db.execute(
-                "INSERT INTO sessions VALUES (?, ?, ?, ?)",
-                (token_digest(session), account["id"], csrf, now + SESSION_AGE),
+            inserted = db.execute(
+                "INSERT INTO sessions SELECT ?, id, ?, ? FROM accounts WHERE id = ? AND password = ?",
+                (token_digest(session), csrf, now + SESSION_AGE, account["id"], account["password"]),
             )
+            if not inserted.rowcount:
+                raise Problem("Usuario o contraseña incorrectos.", 401)
         return session
 
     def session(self, key: str) -> sqlite3.Row | None:
         with self.connection() as db:
             return db.execute(
-                "SELECT s.*, a.name FROM sessions s JOIN accounts a ON a.id = s.account "
+                "SELECT s.*, a.name, a.role FROM sessions s JOIN accounts a ON a.id = s.account "
                 "WHERE s.digest = ? AND s.expires > ?",
                 (token_digest(key), time.time()),
             ).fetchone()
@@ -184,13 +215,17 @@ class Store:
             raise Problem("Credencial de agente incorrecta.", 401)
         return row["id"]
 
-    def pair(self, account: int, old_key: str, code: str) -> str:
+    def pair(self, account: int, old_key: str, code: str, *, require_configured: bool) -> str:
         key = token()
         now = time.time()
         with self.connection(write=True) as db:
             row = self.consume_code(db, "pair", code)
+            if require_configured:
+                host = db.execute("SELECT address FROM agents WHERE id = ?", (row["agent"],)).fetchone()
+                if not host["address"] or ipaddress.IPv4Address(host["address"]) not in self.network:
+                    raise Problem("Pide al admin que configure la dirección del PC antes de vincularlo.")
             db.execute("DELETE FROM browsers WHERE expires < ?", (now,))
-            db.execute("DELETE FROM browsers WHERE digest = ?", (token_digest(old_key),))
+            db.execute("DELETE FROM browsers WHERE account = ? AND digest = ?", (account, token_digest(old_key)))
             db.execute(
                 "INSERT INTO browsers VALUES (?, ?, ?, ?)",
                 (token_digest(key), account, row["agent"], now + BROWSER_AGE),
@@ -217,7 +252,7 @@ class Store:
     def online(seen: float | None) -> bool:
         return seen is not None and time.time() - seen < OFFLINE_AFTER
 
-    def overview(self, account: int, browser: str) -> dict:
+    def overview(self, account: int, browser: str, *, admin: bool) -> dict:
         with self.connection() as db:
             paired = self.browser_agent(db, account, browser)
             instance = db.execute("SELECT * FROM instance").fetchone()
@@ -241,14 +276,21 @@ class Store:
                     "state": visible["state"], "reason": visible["reason"],
                     "endpoint": f'{visible["address"]}:{config.port}' if state == "running" else None,
                 }
-            return {
-                "state": state, "run": current, "agents": agents, "paired": paired,
-                "settings": Settings.model_validate_json(instance["settings"]).model_dump(),
+            settings = Settings.model_validate_json(instance["settings"])
+            overview = {
+                "state": state, "run": current, "paired": paired,
+                "agents": agents if admin else [host for host in agents if host["id"] == paired],
+                "settings": settings.model_dump() if admin else {"version": settings.version, "eula": settings.eula},
                 "saved_at": instance["saved_at"], "busy": run is not None,
-                "network": str(self.network),
                 "progress": json.loads(activity["progress"]) if state == "starting" and activity and activity["progress"] else None,
-                "console": {"run": latest["id"], "commands": state == "running" and activity is not None} if latest else None,
+                "console": {"run": latest["id"], "commands": admin and state == "running" and activity is not None} if latest else None,
             }
+            if admin:
+                overview["network"] = str(self.network)
+                overview["user_configured"] = db.execute(
+                    "SELECT 1 FROM accounts WHERE name = 'user' AND role = 'user'"
+                ).fetchone() is not None
+            return overview
 
     def update_settings(self, settings: Settings) -> None:
         if settings.version != VERSION:

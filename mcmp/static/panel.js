@@ -3,6 +3,9 @@
 const byId = (id) => document.getElementById(id);
 const settingsForm = byId("settings-form");
 const addressForm = byId("address-form");
+const userForm = byId("user-form");
+const adminOnly = document.querySelectorAll("[data-admin-only]");
+const recoverDialog = byId("recover-dialog");
 const recoverForm = byId("recover-form");
 const gameState = byId("game-state");
 const addressSelect = addressForm.elements.agent;
@@ -163,7 +166,7 @@ async function loadConsole(mode = "update") {
 }
 
 function commandControls() {
-  commandInput.disabled = !status?.console?.commands;
+  commandInput.disabled = status?.role !== "admin" || !status.console?.commands;
   commandButton.disabled = commandInput.disabled || Boolean(terminal?.pending || terminal?.sending);
 }
 
@@ -210,8 +213,11 @@ function showLogin() {
   byId("login-panel").hidden = false;
   byId("loading").hidden = true;
   byId("enrollment-wrap").hidden = true;
-  const dialog = byId("recover-dialog");
-  if (dialog.open) dialog.close();
+  byId("enrollment-code").textContent = "";
+  adminOnly.forEach((element) => { element.hidden = true; });
+  userForm.reset();
+  feedback("user-feedback");
+  if (recoverDialog.open) recoverDialog.close();
 }
 
 function fillAddress() {
@@ -226,6 +232,9 @@ function render(data) {
   const previousState = status?.state;
   status = data;
   csrf = data.csrf;
+  const admin = data.role === "admin";
+  adminOnly.forEach((element) => { element.hidden = !admin; });
+  if (!admin && recoverDialog.open) recoverDialog.close();
   byId("loading").hidden = true;
   byId("login-panel").hidden = true;
   byId("dashboard").hidden = false;
@@ -252,12 +261,16 @@ function render(data) {
   byId("start").hidden = data.busy;
   byId("start").disabled = !paired?.online || !paired?.address || !data.settings.eula;
   byId("stop").hidden = data.state !== "running";
-  byId("recover").hidden = !["offline", "interrupted"].includes(data.state);
+  byId("recover").hidden = !admin || !["offline", "interrupted"].includes(data.state);
   if (!data.busy && !data.run?.reason) {
     if (!paired) byId("state-help").textContent = "Vincula este navegador con un PC para iniciar.";
     else if (!paired.online) byId("state-help").textContent = "Inicia el agente del PC vinculado.";
-    else if (!paired.address) byId("state-help").textContent = "Guarda la IPv4 VPN del PC vinculado.";
-    else if (!data.settings.eula) byId("state-help").textContent = "Acepta y guarda la EULA en los ajustes.";
+    else if (!paired.address) byId("state-help").textContent = admin
+      ? "Guarda la IPv4 VPN del PC vinculado."
+      : "Pide al admin que configure la dirección del PC vinculado.";
+    else if (!data.settings.eula) byId("state-help").textContent = admin
+      ? "Acepta y guarda la EULA en los ajustes."
+      : "El admin debe aceptar la EULA de Minecraft antes de que puedas iniciar.";
   }
   byId("device-name").textContent = paired?.name || "Sin vincular";
   byId("device-help").textContent = paired
@@ -265,6 +278,14 @@ function render(data) {
     : "Vincula este navegador para ejecutar Minecraft en su PC.";
   byId("device-pair").querySelector("summary").textContent = paired ? "Cambiar vinculación" : "Vincular navegador";
 
+  if (admin) renderAdministration(data);
+}
+
+function renderAdministration(data) {
+  userForm.querySelector("button").textContent = data.user_configured ? "Cambiar contraseña" : "Crear cuenta";
+  byId("user-help").textContent = data.user_configured
+    ? "Cambiar la contraseña cerrará las sesiones abiertas de user."
+    : "Crea el acceso para iniciar, detener y leer la consola. Mínimo 12 caracteres.";
   if (!settingsDirty) {
     for (const [name, value] of Object.entries(data.settings)) {
       const input = settingsForm.elements.namedItem(name);
@@ -392,12 +413,12 @@ byId("recover").addEventListener("click", () => {
   byId("recover-copy").textContent = status.saved_at
     ? "El siguiente arranque usará la última copia del coordinador. Se pueden perder los cambios posteriores."
     : "Todavía no hay una copia central. El siguiente arranque generará un mundo nuevo.";
-  byId("recover-dialog").showModal();
+  recoverDialog.showModal();
 });
-byId("cancel-recover").addEventListener("click", () => byId("recover-dialog").close());
+byId("cancel-recover").addEventListener("click", () => recoverDialog.close());
 action(recoverForm, "submit", "recover-feedback", async () => {
   await api("/runs/" + recoveryRun + "/recover", "POST", { confirmed: recoverForm.elements.confirmed.checked });
-  byId("recover-dialog").close();
+  recoverDialog.close();
   await refresh();
   feedback("game-feedback", "Reserva liberada. Ya puedes iniciar desde otro PC.");
 });
@@ -408,9 +429,11 @@ action(byId("pair-form"), "submit", "device-feedback", async () => {
   form.reset();
   byId("device-pair").open = false;
   await refresh();
-  addressDirty = false;
-  addressSelect.value = status.paired;
-  fillAddress();
+  if (status?.role === "admin") {
+    addressDirty = false;
+    addressSelect.value = status.paired;
+    fillAddress();
+  }
   feedback("device-feedback", "Navegador vinculado.");
 });
 
@@ -429,6 +452,18 @@ function copy(button, source, messageId) {
 }
 copy("copy-endpoint", "endpoint", "game-feedback");
 copy("copy-enrollment", "enrollment-code", "device-feedback");
+
+action(userForm, "submit", "user-feedback", async () => {
+  const { password, confirmation } = userForm.elements;
+  if (password.value !== confirmation.value) throw new Error("Las contraseñas no coinciden.");
+  const configured = status.user_configured;
+  await api("/accounts/user", "PUT", { password: password.value });
+  userForm.reset();
+  await refresh();
+  if (status?.role === "admin") {
+    feedback("user-feedback", configured ? "Contraseña actualizada." : "Cuenta user creada.");
+  }
+});
 
 settingsForm.addEventListener("input", () => { settingsDirty = true; });
 action(settingsForm, "submit", "settings-feedback", async () => {

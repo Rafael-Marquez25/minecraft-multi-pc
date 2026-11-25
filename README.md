@@ -7,8 +7,21 @@ permite copiar su dirección.
 
 En **Partida** puedes seguir las descargas, el arranque y la subida del
 guardado. **Consola de Minecraft** muestra el registro de la última ejecución,
-incluido el cierre. Mientras Minecraft esté en marcha puedes enviar comandos
-como `list` o `say Hola`. `stop` usa el mismo guardado que **Detener y guardar**.
+incluido el cierre. Mientras Minecraft esté en marcha, el admin puede enviar
+comandos como `list` o `say Hola`. `stop` usa el mismo guardado que **Detener y guardar**.
+
+## Cuenta `user`
+
+Inicia sesión como admin y abre **Cuenta user** para crear la cuenta con una
+contraseña de al menos 12 caracteres. Desde el mismo formulario puedes cambiarla.
+El cambio cierra las sesiones abiertas de `user`.
+
+Con `user` puedes iniciar, detener y guardar la partida, ver su progreso y leer
+la consola. Para iniciar desde tu PC, introduce un código nuevo del agente en
+**Vincular navegador** después de que el admin haya registrado el PC y configurado
+su dirección. Genera el código con `mcmp agent pair` en el PC anfitrión o con
+`./scripts/deploy-local.sh pair` en la prueba local. Cada cuenta conserva su
+vinculación en el navegador.
 
 ## Requisitos de despliegue
 
