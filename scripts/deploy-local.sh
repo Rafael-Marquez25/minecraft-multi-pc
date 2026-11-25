@@ -10,6 +10,7 @@ data=$base/coordinator
 state=$base/agent
 tls=$base/tls
 python=$base/venv/bin/python
+coordinator_log=$base/coordinator.log
 bind=127.0.0.1
 network=127.0.0.1/32
 java=java
@@ -72,14 +73,15 @@ trap 'exit 143' TERM
 
 setsid -- "$python" -I -m mcmp.cli coordinator serve --data-dir "$data" \
     --bind "$bind" --network "$network" --port "$port" \
-    --cert "$tls/panel.pem" --key "$tls/panel-key.pem" 9>&- &
+    --cert "$tls/panel.pem" --key "$tls/panel-key.pem" >>"$coordinator_log" 2>&1 9>&- &
 coordinator_pid=$!
-wait_for_panel "$coordinator_pid" || die "El panel no respondió por HTTPS en $url."
-printf '\nPanel: %s/\nUsuario: admin\nCA para importar en el navegador: %s/ca.pem\n' "$url" "$tls"
+wait_for_panel "$coordinator_pid" || die "El panel no respondió por HTTPS en $url. Consulta $coordinator_log."
+printf '\nPanel: %s/\nUsuario: admin\nCA para importar en el navegador: %s/ca.pem\nLogs del panel: %s\n' \
+    "$url" "$tls" "$coordinator_log"
 
 if [[ ! -f $state/agent.json ]]; then
     [[ -t 0 ]] || die 'Abre una terminal interactiva para registrar el agente.'
-    printf 'Inicia sesión y genera un código en «Registrar un PC Linux».\n'
+    printf 'Genera un código en «Registrar un PC Linux». Pégalo y pulsa Intro. El código no aparece al pegarlo.\n'
     mcmp agent enroll --state-dir "$state" --url "$url" --ca "$tls/ca.pem"
     printf 'Introduce este código en «Vincular navegador»:\n'
     mcmp agent pair --state-dir "$state"
@@ -106,4 +108,4 @@ printf '\nAcepta la EULA en «Ajustes de la partida». Antes de cerrar con Ctrl+
 setsid -- "$python" -I -m mcmp.cli agent run --state-dir "$state" --java "$java" 9>&- &
 agent_pid=$!
 wait -n "$coordinator_pid" "$agent_pid" || true
-die 'El coordinador o el agente ha terminado. Revisa los mensajes de esta terminal.'
+die "El coordinador o el agente ha terminado. Revisa esta terminal y $coordinator_log."

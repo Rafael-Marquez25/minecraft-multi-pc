@@ -35,7 +35,8 @@ partida. Para entrar en la partida, usa Minecraft Java 26.3.
 2. Importa `.local/local/tls/ca.pem` como autoridad de confianza en el navegador
    y abre <https://127.0.0.1:8443> o la URL que indique el script. Inicia sesión,
    genera un código en **Registrar un PC Linux** e introdúcelo en la terminal.
-   El script te dará el código para **Vincular navegador**. Para pedir otro,
+   El código se introduce de forma oculta. Pulsa Intro y el script te dará el
+   código para **Vincular navegador**. Para pedir otro,
    ejecuta `./scripts/deploy-local.sh pair` desde una segunda terminal.
 3. En **Ajustes de la partida**, acepta la EULA de Minecraft y guarda. Pulsa
    **Iniciar** y conéctate a la dirección que muestra el panel. Para cerrar la
@@ -44,6 +45,7 @@ partida. Para entrar en la partida, usa Minecraft Java 26.3.
 
 Vuelve a ejecutar `./scripts/deploy-local.sh` para reanudar la prueba. El script
 reutiliza la cuenta, el agente y los guardados de `.local/local/`.
+Los logs del panel se guardan en `.local/local/coordinator.log`.
 
 ## Desplegar en la Raspberry Pi por VPN
 
