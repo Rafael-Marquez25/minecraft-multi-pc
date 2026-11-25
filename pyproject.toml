@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minecraft-multi-pc"
+version = "0.2.0"
+description = "Coordinador web y agente Linux para Minecraft"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "jinja2>=3.1,<4",
+    "pydantic>=2.9,<3",
+    "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+mcmp = "mcmp.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mcmp*"]
+
+[tool.setuptools.package-data]
+mcmp = ["static/*", "templates/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

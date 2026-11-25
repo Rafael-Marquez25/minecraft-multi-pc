@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minecraft Multi-PC</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='panel.css') }}">
+  <script src="{{ url_for('static', path='panel.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="Minecraft Multi-PC, inicio">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Minecraft <strong>Multi-PC</strong></span>
+      </a>
+      <div id="account-bar" class="account" hidden>
+        <span id="account-name"></span>
+        <button id="logout" class="text-button" type="button">Cerrar sesión</button>
+      </div>
+    </div>
+  </header>
+  <main class="shell">
+    <p id="loading" class="loading" role="status">Conectando al panel…</p>
+    <p id="connection-error" class="notice error" role="status" hidden></p>
+
+    <section id="login-panel" class="login surface" aria-labelledby="login-title" hidden>
+      <h1 id="login-title">Entrar al panel</h1>
+      <form id="login-form" class="stack" method="post">
+        <label>Usuario<input name="name" autocomplete="username" maxlength="64" required></label>
+        <label>Contraseña<input name="password" type="password" autocomplete="current-password" maxlength="256" required></label>
+        <button class="primary">Iniciar sesión</button>
+        <p id="login-error" class="error feedback" role="status"></p>
+      </form>
+    </section>
+
+    <div id="dashboard" hidden>
+      <h1>Servidor de Minecraft</h1>
+      <div class="overview-grid">
+        <section class="surface session" aria-labelledby="session-title">
+          <div class="session-heading">
+            <div>
+              <p class="muted" id="game-version">Java Edition · 26.3</p>
+              <h2 id="session-title">Partida</h2>
+            </div>
+            <div id="game-state" class="state" role="status"><span>Parado</span></div>
+          </div>
+          <p id="state-help" class="state-help"></p>
+          <div id="game-progress" class="game-progress" hidden>
+            <div class="progress-caption">
+              <label id="progress-label" for="progress-bar" role="status"></label>
+              <span id="progress-count"></span>
+            </div>
+            <progress id="progress-bar" max="100" aria-describedby="progress-count"></progress>
+          </div>
+          <dl class="facts">
+            <div><dt>Anfitrión</dt><dd id="active-host">—</dd></div>
+            <div><dt>Última copia guardada</dt><dd id="last-save">—</dd></div>
+          </dl>
+          <div id="endpoint-wrap" class="endpoint" hidden>
+            <div><span class="muted">Dirección de Minecraft</span><code id="endpoint"></code></div>
+            <button id="copy-endpoint" type="button">Copiar dirección</button>
+          </div>
+          <div class="actions">
+            <button id="start" class="primary" type="button">Iniciar</button>
+            <button id="stop" type="button" hidden>Detener y guardar</button>
+            <button id="recover" class="danger" type="button" hidden>Recuperar desde la última copia</button>
+          </div>
+          <p id="game-feedback" class="feedback" role="status"></p>
+          <details id="game-console" class="game-console" hidden>
+            <summary>Consola de Minecraft</summary>
+            <div class="console-view">
+              <div class="console-navigation" aria-label="Páginas del registro">
+                <button id="console-older" class="text-button" type="button" hidden>Logs anteriores</button>
+                <button id="console-latest" class="text-button" type="button" hidden>Volver al directo</button>
+              </div>
+              <pre id="console-output" tabindex="0" aria-label="Salida de Minecraft"></pre>
+              <p id="console-connection" class="feedback" role="status" hidden></p>
+              <form id="console-command" class="console-command" autocomplete="off">
+                <input name="command" aria-label="Comando de Minecraft" placeholder="Ejemplo: list" maxlength="1024" spellcheck="false" required disabled>
+                <button type="submit" disabled>Enviar</button>
+              </form>
+              <p id="command-feedback" class="feedback" role="status"></p>
+            </div>
+          </details>
+        </section>
+
+        <section class="surface device" aria-labelledby="device-title">
+          <h2 id="device-title">Este navegador</h2>
+          <p id="device-name" class="device-name">Sin vincular</p>
+          <p id="device-help" class="muted"></p>
+          <details id="device-pair">
+            <summary>Vincular navegador</summary>
+            <form id="pair-form" class="stack">
+              <label>Código del agente<input name="code" maxlength="128" spellcheck="false" autocomplete="off" required></label>
+              <p class="muted">Ejecuta <code>mcmp agent pair</code> en este PC.</p>
+              <button>Vincular</button>
+            </form>
+          </details>
+          <details>
+            <summary>Registrar un PC Linux</summary>
+            <p class="muted">Genera un código e introdúcelo cuando el agente ejecute <code>mcmp agent enroll</code>.</p>
+            <button id="enrollment" type="button">Generar código de registro</button>
+            <div id="enrollment-wrap" class="token-field" hidden>
+              <code id="enrollment-code"></code>
+              <button id="copy-enrollment" type="button">Copiar</button>
+            </div>
+          </details>
+          <p id="device-feedback" class="feedback" role="status"></p>
+        </section>
+      </div>
+
+      <div class="settings-grid">
+        <section class="surface" aria-labelledby="settings-title">
+          <div class="section-heading">
+            <h2 id="settings-title">Ajustes de la partida</h2>
+            <p id="settings-help" class="muted" hidden>Podrás editarlos cuando termine la ejecución.</p>
+          </div>
+          <form id="settings-form">
+            <fieldset id="settings-fields">
+              <div class="form-grid">
+                <label>Versión<select name="version"><option value="26.3">Java Vanilla 26.3</option></select></label>
+                <label>RAM (MiB)<input name="memory_mib" type="number" min="1024" max="65536" value="2048" required></label>
+                <label>Puerto de juego<input name="port" type="number" min="1024" max="65535" value="25565" required></label>
+                <label>Máximo de jugadores<input name="max_players" type="number" min="1" max="100" value="4" required></label>
+                <label>Dificultad<select name="difficulty">
+                  <option value="peaceful">Pacífico</option><option value="easy">Fácil</option>
+                  <option value="normal" selected>Normal</option><option value="hard">Difícil</option>
+                </select></label>
+                <label>Semilla<input name="seed" maxlength="128" placeholder="Aleatoria"><small id="seed-help" hidden>Fijada para el mundo actual.</small></label>
+              </div>
+              <label class="check"><input name="eula" type="checkbox"> <span>Acepto la <a href="https://www.minecraft.net/es-es/eula" target="_blank" rel="noopener noreferrer">EULA de Minecraft</a>.</span></label>
+              <button>Guardar ajustes</button>
+            </fieldset>
+            <p id="settings-feedback" class="feedback" role="status"></p>
+          </form>
+        </section>
+
+        <section class="surface network" aria-labelledby="network-title">
+          <div class="section-heading">
+            <h2 id="network-title">Red de los anfitriones</h2>
+            <p class="muted" id="network-range"></p>
+          </div>
+          <p id="no-agents" class="muted">Registra un PC Linux para configurar su dirección.</p>
+          <form id="address-form" class="stack" hidden>
+            <label>PC anfitrión<select name="agent" required></select></label>
+            <label>IPv4 del PC en la VPN<input name="address" maxlength="15" inputmode="decimal" autocomplete="off" spellcheck="false" required></label>
+            <button>Guardar dirección</button>
+          </form>
+          <p id="network-feedback" class="feedback" role="status"></p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="recover-dialog" aria-labelledby="recover-title">
+    <form id="recover-form" class="stack">
+      <h2 id="recover-title">Recuperar la partida</h2>
+      <p id="recover-copy"></p>
+      <label class="check"><input type="checkbox" name="confirmed" required> Confirmo que Minecraft está apagado en el anfitrión anterior.</label>
+      <div class="actions">
+        <button id="cancel-recover" type="button">Cancelar</button>
+        <button class="danger">Liberar reserva</button>
+      </div>
+      <p id="recover-feedback" class="feedback" role="status"></p>
+    </form>
+  </dialog>
+</body>
+</html>
