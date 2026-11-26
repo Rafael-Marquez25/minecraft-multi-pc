@@ -51,11 +51,12 @@ otra sesión en una ventana privada y usa un código de vinculación nuevo.
 ## Servidor definitivo en la Raspberry Pi
 
 1. Con la VPN operativa, ejecuta el instalador en la Pi como tu usuario
-   habitual. Cambia la IPv4 y la subred del ejemplo si tu VPN usa otras. Para
-   consultar la IPv4 de WireGuard puedes usar `ip -4 addr show dev wg0`.
+   habitual. Los ejemplos usan la IP `10.42.0.1` y una subred `/24`.
+   Ajusta ambos valores a tu red. Si tu interfaz WireGuard es `wg0`,
+   comprueba la dirección y el prefijo con `ip -4 addr show dev wg0`.
 
    ```sh
-   ./scripts/deploy-server.sh --bind 10.8.0.1 --network 10.8.0.0/24
+   ./scripts/deploy-server.sh --bind 10.42.0.1 --network 10.42.0.0/24
    ```
 
    Crea la contraseña de `admin` cuando se solicite. El script pide `sudo`
@@ -66,42 +67,107 @@ otra sesión en una ventana privada y usa un código de vinculación nuevo.
    la interfaz, la subred y el puerto a tu instalación.
 
    ```sh
-   sudo ufw allow in on wg0 from 10.8.0.0/24 to 10.8.0.1 port 8443 proto tcp
+   sudo ufw allow in on wg0 from 10.42.0.0/24 to 10.42.0.1 port 8443 proto tcp
    ```
 
    El script usa el puerto `8443` por defecto. Para una instalación nueva
    puedes indicar `--port 8444` y usar ese mismo puerto en UFW y en las URL.
 
-3. Entrega a los usuarios la URL que imprime el script y la CA pública
-   `.local/server/tls/ca.pem`. Desde un equipo conectado a la VPN, importa
-   esa CA, abre <https://10.8.0.1:8443> o la URL configurada y entra como
+3. Para el primer acceso, copia la CA pública `.local/server/tls/ca.pem` por
+   SSH o desde un equipo de confianza e impórtala como autoridad en el
+   navegador. Con la VPN conectada, abre <https://10.42.0.1:8443> o la URL
+   interna configurada en Nginx y entra como
    `admin`. En **Ajustes de la partida**, acepta y guarda la EULA. Si vas a
    dar acceso a la cuenta `user`, crea su contraseña en **Cuenta user**.
 
-Después de iniciar sesión, `admin` y `user` pueden abrir **Este navegador → Certificado HTTPS**
-y descargar `minecraft-ca.pem` antes de vincular el PC. Para el primer acceso
-desde un navegador que aún no confía en el panel, transfiere la CA por SSH
-o desde un equipo de confianza que ya pueda acceder.
+Una vez dentro, `admin` y `user` pueden descargar `minecraft-ca.pem` desde
+**Este navegador → Certificado HTTPS**, incluso antes de vincular el PC.
 
-### Certificado para Nginx
+### URL interna con Dnsmasq y Nginx
 
-Si usas un nombre interno como `mc.home.arpa`, añade `--nginx-hostname` al
-comando de instalación del servidor. En un despliegue existente, usa la misma
-IPv4, subred y puerto que ya tiene el coordinador.
+Para servir el panel en <https://mc.home.arpa>, añade `--nginx-hostname`
+al comando de instalación. En un despliegue existente, usa el mismo clon,
+IP, subred y puerto del coordinador.
 
 ```sh
-./scripts/deploy-server.sh --bind 10.8.0.1 --network 10.8.0.0/24 \
+./scripts/deploy-server.sh --bind 10.42.0.1 --network 10.42.0.0/24 \
   --nginx-hostname mc.home.arpa
 ```
 
 El instalador firma el certificado con la CA del coordinador y copia
 `mc.home.arpa.pem`, `mc.home.arpa.key` y la CA pública `ca.pem` a
-`/etc/nginx/minecraft-tls/`. Configura el registro en Dnsmasq y el sitio
-HTTPS en Nginx con esos archivos.
+`/etc/nginx/minecraft-tls/`.
 
-Para renovar el certificado, ejecuta el mismo comando cuando queden 30 días o
-menos. A continuación, aplica el certificado con
-`sudo nginx -t && sudo systemctl reload nginx`.
+1. Si Dnsmasq todavía no resuelve el nombre, añade el registro en
+   `/etc/dnsmasq.d/home-server.conf`. Aplica el cambio con
+   `sudo dnsmasq --test && sudo systemctl restart dnsmasq`.
+
+   ```ini
+   host-record=mc.home.arpa,10.42.0.1
+   ```
+
+2. Crea `/etc/nginx/sites-available/mc.home.arpa`. Si cambiaste el puerto del
+   coordinador, usa ese puerto en `proxy_pass`.
+
+   ```nginx
+   server {
+       listen 10.42.0.1:443 ssl;
+       server_name mc.home.arpa;
+
+       ssl_certificate     /etc/nginx/minecraft-tls/mc.home.arpa.pem;
+       ssl_certificate_key /etc/nginx/minecraft-tls/mc.home.arpa.key;
+
+       location / {
+           proxy_pass https://10.42.0.1:8443;
+           proxy_set_header Host $host;
+           proxy_ssl_verify on;
+           proxy_ssl_name 10.42.0.1;
+           proxy_ssl_trusted_certificate /etc/nginx/minecraft-tls/ca.pem;
+       }
+   }
+   ```
+
+3. Habilita el sitio la primera vez y recarga Nginx. Si usas UFW,
+   permite también `443/tcp` desde la subred VPN en su interfaz.
+
+   ```sh
+   sudo ln -s /etc/nginx/sites-available/mc.home.arpa /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+4. Desde un cliente de la VPN, comprueba que `getent ahostsv4 mc.home.arpa`
+   devuelve `10.42.0.1`. Si aún necesitas la CA pública, puedes copiarla desde
+   ese cliente con el siguiente comando. Sustituye `tu_usuario` por tu usuario
+   SSH del servidor e importa el archivo en el navegador antes de abrir
+   <https://mc.home.arpa>.
+
+   ```sh
+   scp tu_usuario@10.42.0.1:/etc/nginx/minecraft-tls/ca.pem ./minecraft-ca.pem
+   ```
+
+Para renovar el certificado, vuelve a ejecutar el instalador con
+`--nginx-hostname` cuando queden 30 días o menos y aplica el cambio con
+`sudo nginx -t && sudo systemctl reload nginx`. Los agentes pueden seguir
+usando la URL directa del coordinador en `8443`.
+
+### Actualizar un servidor ya desplegado
+
+Si hay una partida activa, pulsa **Detener y guardar** y espera la
+confirmación de la copia. Desde el mismo clon, trae los cambios y reinicia
+el coordinador con `--update` para instalar el paquete nuevo.
+
+```sh
+git pull --ff-only && ./scripts/restart-server.sh --update
+```
+
+Para reiniciar solo el coordinador, ejecuta `./scripts/restart-server.sh`.
+El script espera a que el panel responda por HTTPS. Añade `--reload-nginx`
+si también quieres validar y recargar la configuración de Nginx.
+
+Si vas a habilitar Nginx por primera vez o a renovar su certificado, ejecuta
+también el instalador con `--nginx-hostname`. El estado del coordinador queda
+en `.local/server/data/`. Al pasar de la IP al dominio, inicia sesión y vuelve
+a vincular el navegador una vez, porque las cookies se guardan por host.
 
 ## PC del usuario en Linux
 
@@ -122,7 +188,7 @@ Estos pasos instalan el agente en el PC que va a alojar la partida.
 
    ```sh
    .venv/bin/mcmp agent enroll --state-dir .local/vpn-agent \
-     --url https://10.8.0.1:8443 --ca .local/vpn-ca.pem
+     --url https://10.42.0.1:8443 --ca .local/vpn-ca.pem
    ```
 
 3. Pide a `admin` que guarde la IPv4 VPN del PC en **Red de los anfitriones**.

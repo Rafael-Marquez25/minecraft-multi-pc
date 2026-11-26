@@ -1,4 +1,4 @@
-# Funciones compartidas por los dos instaladores.
+# Funciones compartidas por los scripts de despliegue.
 
 die() {
     printf 'Error: %s\n' "$*" >&2
@@ -23,6 +23,14 @@ parse_port() {
     [[ $1 =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1024 && 10#$1 <= 65535 )) ||
         die 'El puerto debe estar entre 1024 y 65535.'
     printf '%d\n' "$((10#$1))"
+}
+
+unit_argument() {
+    local value=$1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//%/%%}
+    printf '"%s"' "$value"
 }
 
 check_listener() {

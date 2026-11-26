@@ -74,14 +74,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-unit_argument() {
-    local value=$1
-    value=${value//\\/\\\\}
-    value=${value//\"/\\\"}
-    value=${value//%/%%}
-    printf '"%s"' "$value"
-}
-
 install_nginx_tls() (
     local hostname=$1
     local key=$tls/$hostname.key certificate=$tls/$hostname.pem
