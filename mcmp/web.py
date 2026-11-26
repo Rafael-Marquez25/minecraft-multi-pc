@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import os
 import re
+import ssl
 import tempfile
 import time
 from collections import defaultdict, deque
@@ -68,8 +69,29 @@ def set_cookie(response: Response, name: str, value: str, age: int) -> None:
     response.set_cookie(name, value, max_age=age, secure=True, httponly=True, samesite="strict")
 
 
-def create_app(directory: Path, network: IPv4Network) -> FastAPI:
+def load_ca_certificate(path: Path) -> bytes | None:
+    try:
+        pem = path.read_bytes().strip()
+        if not re.fullmatch(
+            rb"-----BEGIN CERTIFICATE-----\r?\n"
+            rb"[A-Za-z0-9+/=\r\n]+\r?\n"
+            rb"-----END CERTIFICATE-----",
+            pem,
+        ):
+            return None
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(cadata=pem.decode("ascii"))
+    except (OSError, ValueError):
+        return None
+    authorities = context.get_ca_certs(binary_form=True)
+    if len(authorities) != 1:
+        return None
+    return ssl.DER_cert_to_PEM_cert(authorities[0]).encode("ascii")
+
+
+def create_app(directory: Path, network: IPv4Network, *, ca_path: Path | None = None) -> FastAPI:
     store = Store(directory, network)
+    ca_certificate = load_ca_certificate(ca_path) if ca_path is not None else None
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = store
     templates = Jinja2Templates(directory=HERE / "templates")
@@ -145,7 +167,18 @@ def create_app(directory: Path, network: IPv4Network) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
-        return templates.TemplateResponse(request=request, name="index.html")
+        return templates.TemplateResponse(
+            request=request, name="index.html", context={"ca_available": ca_certificate is not None},
+        )
+
+    @app.get(f"{API_PREFIX}/ca-certificate")
+    def download_ca_certificate(row=Depends(session)):
+        if ca_certificate is None:
+            raise Problem("La CA del panel no está disponible.", 404)
+        return Response(
+            ca_certificate, media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="minecraft-ca.pem"'},
+        )
 
     @app.post(f"{API_PREFIX}/login")
     def login(request: Request, response: Response, credentials: Credentials):

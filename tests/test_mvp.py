@@ -1,6 +1,7 @@
 import hashlib
 import io
 import socket
+import subprocess
 import tarfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -91,6 +92,64 @@ def test_dashboard_login_cookies_and_csrf(panel):
         sign_in(anonymous)
         anonymous.headers.pop("X-CSRF-Token")
         assert anonymous.post(f"{API}/enrollment-code").status_code == 403
+
+
+@pytest.fixture(scope="module")
+def certificates(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("certificates")
+    for name, is_ca in (("ca", "TRUE"), ("site", "FALSE")):
+        subprocess.run(
+            [
+                "openssl", "req", "-new", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+                "-noenc", "-config", "/dev/null", "-days", "1", "-subj", f"/CN={name}",
+                "-addext", f"basicConstraints=critical,CA:{is_ca}",
+                "-out", f"{name}.pem", "-keyout", f"{name}-key.pem",
+            ],
+            cwd=directory, check=True, capture_output=True,
+        )
+    return directory
+
+
+def test_admin_and_user_can_download_ca_before_pairing(tmp_path, certificates):
+    ca_path = certificates / "ca.pem"
+    app = create_app(tmp_path / "coordinator", NETWORK, ca_path=ca_path)
+    app.state.store.add_account("admin", PASSWORD)
+    download = f"{API}/ca-certificate"
+    with TestClient(app, base_url="https://testserver") as admin, TestClient(
+        app, base_url="https://testserver",
+    ) as user:
+        assert user.get(download).status_code == 401
+        sign_in(admin)
+        assert admin.put(f"{API}/accounts/user", json={"password": USER_PASSWORD}).status_code == 200
+        sign_in(user, "user", USER_PASSWORD)
+        for client in (admin, user):
+            assert client.get(f"{API}/status").json()["paired"] is None
+            assert "Descargar CA del panel" in client.get("/").text
+            response = client.get(download)
+            assert response.status_code == 200
+            assert response.headers["Content-Disposition"] == 'attachment; filename="minecraft-ca.pem"'
+            assert response.headers["Cache-Control"] == "no-store"
+            assert response.content == ca_path.read_bytes()
+
+
+@pytest.mark.parametrize("kind", ("missing", "invalid", "site", "private-key", "multiple"))
+def test_unavailable_ca_hides_download(tmp_path, certificates, kind):
+    ca_path = tmp_path / "ca.pem"
+    valid_ca = (certificates / "ca.pem").read_bytes()
+    contents = {
+        "invalid": b"-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----\n",
+        "site": (certificates / "site.pem").read_bytes(),
+        "private-key": valid_ca + (certificates / "ca-key.pem").read_bytes(),
+        "multiple": valid_ca * 2,
+    }
+    if kind != "missing":
+        ca_path.write_bytes(contents[kind])
+    app = create_app(tmp_path / "coordinator", NETWORK, ca_path=ca_path)
+    app.state.store.add_account("admin", PASSWORD)
+    with TestClient(app, base_url="https://testserver") as client:
+        sign_in(client)
+        assert "Descargar CA del panel" not in client.get("/").text
+        assert client.get(f"{API}/ca-certificate").status_code == 404
 
 
 def test_user_can_play_and_read_console_but_cannot_manage_the_server(panel, tmp_path):

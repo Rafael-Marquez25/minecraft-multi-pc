@@ -78,6 +78,31 @@ otra sesión en una ventana privada y usa un código de vinculación nuevo.
    `admin`. En **Ajustes de la partida**, acepta y guarda la EULA. Si vas a
    dar acceso a la cuenta `user`, crea su contraseña en **Cuenta user**.
 
+Después de iniciar sesión, `admin` y `user` pueden abrir **Este navegador → Certificado HTTPS**
+y descargar `minecraft-ca.pem` antes de vincular el PC. Para el primer acceso
+desde un navegador que aún no confía en el panel, transfiere la CA por SSH
+o desde un equipo de confianza que ya pueda acceder.
+
+### Certificado para Nginx
+
+Si usas un nombre interno como `mc.home.arpa`, añade `--nginx-hostname` al
+comando de instalación del servidor. En un despliegue existente, usa la misma
+IPv4, subred y puerto que ya tiene el coordinador.
+
+```sh
+./scripts/deploy-server.sh --bind 10.8.0.1 --network 10.8.0.0/24 \
+  --nginx-hostname mc.home.arpa
+```
+
+El instalador firma el certificado con la CA del coordinador y copia
+`mc.home.arpa.pem`, `mc.home.arpa.key` y la CA pública `ca.pem` a
+`/etc/nginx/minecraft-tls/`. Configura el registro en Dnsmasq y el sitio
+HTTPS en Nginx con esos archivos.
+
+Para renovar el certificado, ejecuta el mismo comando cuando queden 30 días o
+menos. A continuación, aplica el certificado con
+`sudo nginx -t && sudo systemctl reload nginx`.
+
 ## PC del usuario en Linux
 
 Estos pasos instalan el agente en el PC que va a alojar la partida.

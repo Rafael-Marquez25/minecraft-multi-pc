@@ -90,6 +90,15 @@
           <p id="device-name" class="device-name">Sin vincular</p>
           <p id="device-help" class="muted"></p>
           <p id="pair-success" class="feedback device-feedback" role="status"></p>
+          {% if ca_available %}
+          <details id="certificate-info">
+            <summary>Certificado HTTPS</summary>
+            <div class="stack">
+              <a href="{{ url_for('download_ca_certificate') }}" download>Descargar CA del panel</a>
+              <p class="muted">Importa el archivo en «Autoridades» del navegador en el PC que necesite confiar en el panel.</p>
+            </div>
+          </details>
+          {% endif %}
           <details id="device-pair">
             <summary>Vincular navegador</summary>
             <form id="pair-form" class="stack">
