@@ -51,9 +51,7 @@ while (($#)); do
 done
 
 require_tools python3 openssl curl flock setsid "$java"
-java_version=$("$java" -version 2>&1) || die "No se pudo ejecutar $java."
-[[ $java_version =~ version\ \"([0-9]{1,3}) && ${BASH_REMATCH[1]} -ge 25 ]] ||
-    die 'Minecraft requiere Java 25 o posterior. Usa --java para seleccionar el ejecutable.'
+require_java "$java"
 
 lock_deployment
 port=${requested_port:-8443}

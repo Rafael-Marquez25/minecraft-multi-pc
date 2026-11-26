@@ -13,6 +13,13 @@ require_tools() {
     python3 -I -c 'import sys; sys.exit(sys.version_info < (3, 12))' || die 'Instala Python 3.12 o posterior.'
 }
 
+require_java() {
+    local java=$1 version
+    version=$("$java" -version 2>&1) || die "No se pudo ejecutar $java."
+    [[ $version =~ version\ \"([0-9]{1,3}) && ${BASH_REMATCH[1]} -ge 25 ]] ||
+        die 'Minecraft requiere Java 25 o posterior. Usa --java para seleccionar el ejecutable.'
+}
+
 lock_deployment() {
     mkdir -p -- "$base"
     exec 9>"$base/deploy.lock"

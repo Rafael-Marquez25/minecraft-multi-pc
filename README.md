@@ -171,37 +171,32 @@ a vincular el navegador una vez, porque las cookies se guardan por host.
 
 ## PC del usuario en Linux
 
-Estos pasos instalan el agente en el PC que va a alojar la partida.
+El script instala y arranca el agente en el PC que va a alojar la partida y
+lo conecta al coordinador que ya está funcionando en el servidor.
 
 1. Conecta el PC a la VPN y guarda la CA pública que te dio el administrador
    en `.local/vpn-ca.pem` dentro del clon. Impórtala en el navegador y abre
-   la URL del panel. Instala el agente desde la raíz del clon.
+   la URL del panel. Si guardas la CA en otra ruta, pásala con `--ca ARCHIVO`.
+2. Desde la raíz del clon, ejecuta lo siguiente con la URL VPN del
+   coordinador. Cuando el script pida el código, pídele a `admin` que lo genere
+   en **Registrar un PC Linux** y pégalo en la terminal.
 
    ```sh
-   python3 -m venv .venv
-   .venv/bin/python -m pip install .
-   ```
-
-2. Pide a `admin` un código nuevo de **Registrar un PC Linux**. Ejecuta el
-   registro en el PC anfitrión, cambia la URL si corresponde y pega el código
-   cuando lo pida.
-
-   ```sh
-   .venv/bin/mcmp agent enroll --state-dir .local/vpn-agent \
-     --url https://10.42.0.1:8443 --ca .local/vpn-ca.pem
+   ./scripts/deploy-agent.sh --url https://10.42.0.1:8443
    ```
 
 3. Pide a `admin` que guarde la IPv4 VPN del PC en **Red de los anfitriones**.
    Los jugadores deben poder alcanzar esa IPv4 por el puerto TCP de Minecraft
    que indique el panel, `25565` por defecto.
-4. Genera el código en la terminal con `pair`. Entra al panel con la cuenta
-   que vayas a usar y pega el código en **Vincular navegador**. Luego ejecuta
-   `run` y deja la terminal abierta mientras uses **Iniciar** desde la web.
+4. Entra al panel con la cuenta que vayas a usar y pega el código que muestra
+   el script en **Vincular navegador**. Deja la terminal abierta y pulsa
+   **Iniciar** en el panel. Si el código caduca, ejecuta
+   `./scripts/deploy-agent.sh pair` desde otra terminal.
 
-   ```sh
-   .venv/bin/mcmp agent pair --state-dir .local/vpn-agent
-   .venv/bin/mcmp agent run --state-dir .local/vpn-agent
-   ```
+Para los siguientes arranques ejecuta `./scripts/deploy-agent.sh`. El script
+reutiliza el registro de `.local/vpn-agent/`, incluido el que hayas hecho
+manualmente en ese directorio. Si necesitas elegir el ejecutable de Java,
+añade `--java /ruta/a/bin/java` al comando de arranque.
 
 ### Servicio de usuario Linux opcional
 
@@ -214,7 +209,7 @@ Para arrancar el agente en segundo plano al iniciar sesión en Linux, crea
 Description=Agente Minecraft Multi-PC
 
 [Service]
-ExecStart="/ruta/minecraft-multi-pc/.venv/bin/python" -I -m mcmp.cli agent run --state-dir "/ruta/minecraft-multi-pc/.local/vpn-agent"
+ExecStart="/ruta/minecraft-multi-pc/.local/vpn-agent/venv/bin/python" -I -m mcmp.cli agent run --state-dir "/ruta/minecraft-multi-pc/.local/vpn-agent"
 Restart=on-failure
 RestartSec=3
 KillMode=mixed
