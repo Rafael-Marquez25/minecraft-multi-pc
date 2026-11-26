@@ -216,6 +216,8 @@ function showLogin() {
   byId("loading").hidden = true;
   byId("enrollment-wrap").hidden = true;
   byId("enrollment-code").textContent = "";
+  byId("enrollment-manual").checked = false;
+  byId("device-enrollment").open = false;
   pairForm.reset();
   pairDetails.open = false;
   feedback("pair-success");
@@ -451,10 +453,13 @@ action(pairForm, "submit", "pair-feedback", async () => {
 });
 
 action(byId("enrollment"), "click", "enrollment-feedback", async () => {
-  const { code } = await api("/enrollment-code", "POST");
+  const automaticAddress = !byId("enrollment-manual").checked;
+  const { code } = await api("/enrollment-code", "POST", { automatic_address: automaticAddress });
   byId("enrollment-code").textContent = code;
   byId("enrollment-wrap").hidden = false;
-  feedback("enrollment-feedback", "Código de registro generado.");
+  feedback("enrollment-feedback", automaticAddress
+    ? "Pega el código en el PC anfitrión para registrar su IPv4 VPN."
+    : "Después del registro, guarda la IPv4 del PC en «Red de los anfitriones».");
 });
 
 function copy(button, source, messageId) {

@@ -18,6 +18,7 @@ from .protocol import (
 SESSION_AGE = 12 * 60 * 60
 BROWSER_AGE = 365 * 24 * 60 * 60
 CODE_AGE = 10 * 60
+AUTOMATIC_ENROLLMENT = "enroll-auto"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -189,22 +190,37 @@ class Store:
         return code
 
     @staticmethod
-    def consume_code(db: sqlite3.Connection, kind: str, code: str) -> sqlite3.Row:
+    def consume_code(
+        db: sqlite3.Connection, kind: str, code: str, *, alternative_kind: str | None = None,
+    ) -> sqlite3.Row:
         row = db.execute(
-            "DELETE FROM codes WHERE digest = ? AND kind = ? AND expires > ? RETURNING *",
-            (token_digest(code), kind, time.time()),
+            "DELETE FROM codes WHERE digest = ? AND kind IN (?, ?) AND expires > ? RETURNING *",
+            (token_digest(code), kind, alternative_kind, time.time()),
         ).fetchone()
         if not row:
             raise Problem("El código caducó, ya se usó o es incorrecto.", 400)
         return row
 
-    def enroll(self, code: str, name: str) -> dict:
+    def enrollment_address(self, peer: str | None) -> str:
+        try:
+            address = ipaddress.IPv4Address(peer or "")
+        except ValueError:
+            address = None
+        if (
+            address is None or address not in self.network or address.is_unspecified or address.is_multicast
+            or (self.network.prefixlen < 31 and address in (self.network.network_address, self.network.broadcast_address))
+        ):
+            raise Problem("Conecta el PC a la VPN y usa la URL HTTPS directa del coordinador para registrarlo.", 400)
+        return str(address)
+
+    def enroll(self, code: str, name: str, *, peer: str | None = None) -> dict:
         agent, key = str(uuid.uuid4()), token()
         with self.connection(write=True) as db:
-            self.consume_code(db, "enroll", code)
+            row = self.consume_code(db, "enroll", code, alternative_kind=AUTOMATIC_ENROLLMENT)
+            address = self.enrollment_address(peer) if row["kind"] == AUTOMATIC_ENROLLMENT else None
             db.execute(
-                "INSERT INTO agents (id, name, digest) VALUES (?, ?, ?)",
-                (agent, name, token_digest(key)),
+                "INSERT INTO agents (id, name, digest, address) VALUES (?, ?, ?, ?)",
+                (agent, name, token_digest(key), address),
             )
         return {"id": agent, "token": key}
 

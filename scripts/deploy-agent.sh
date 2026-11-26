@@ -56,10 +56,9 @@ else
     [[ -t 0 ]] || die 'Abre una terminal interactiva para registrar el agente.'
     install_project
 
-    printf '\nEn el panel, pide a admin un código de «Registrar un PC Linux» y pégalo cuando se solicite.\n' >&2
+    printf '\nEn el panel, genera un código en «Registrar un PC Linux» y pégalo cuando se solicite.\n' >&2
     mcmp agent enroll --state-dir "$base" --url "$url" --ca "$ca"
-    printf '\nPide a admin que guarde la IPv4 VPN de este PC en «Red de los anfitriones».\n' >&2
-    printf 'Después, pega este código en «Vincular navegador» en el panel.\n' >&2
+    printf '\nDespués, pega este código en «Vincular navegador» en el panel.\n' >&2
     if ! mcmp agent pair --state-dir "$base"; then
         printf 'Genera otro código con «%s pair» desde otra terminal.\n' "$0" >&2
     fi

@@ -74,7 +74,7 @@ def run_coordinator(args: argparse.Namespace) -> None:
     if not 1024 <= args.port <= 65535:
         raise ValueError("--port debe estar entre 1024 y 65535.")
     uvicorn.run(
-        create_app(args.data_dir, args.network, ca_path=args.cert.with_name("ca.pem")),
+        create_app(args.data_dir, args.network, ca_path=args.cert.with_name("ca.pem"), bind=args.bind, port=args.port),
         host=str(args.bind), port=args.port,
         ssl_certfile=str(args.cert), ssl_keyfile=str(args.key), proxy_headers=False,
     )

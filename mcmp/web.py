@@ -23,7 +23,7 @@ from starlette.requests import ClientDisconnect
 
 from .protocol import API_PREFIX, CONSOLE_PAGE, MAX_SNAPSHOT_BYTES, AgentReport, Settings
 from .snapshots import InvalidSnapshot, inspect_archive
-from .store import BROWSER_AGE, SESSION_AGE, Problem, Store
+from .store import AUTOMATIC_ENROLLMENT, BROWSER_AGE, SESSION_AGE, Problem, Store
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "__Host-mcmp-session"
@@ -42,6 +42,10 @@ class UserPassword(BaseModel):
 
 class Code(BaseModel):
     code: str = Field(min_length=1, max_length=128)
+
+
+class EnrollmentCodeRequest(BaseModel):
+    automatic_address: bool = False
 
 
 class Enrollment(Code):
@@ -89,9 +93,13 @@ def load_ca_certificate(path: Path) -> bytes | None:
     return ssl.DER_cert_to_PEM_cert(authorities[0]).encode("ascii")
 
 
-def create_app(directory: Path, network: IPv4Network, *, ca_path: Path | None = None) -> FastAPI:
+def create_app(
+    directory: Path, network: IPv4Network, *, ca_path: Path | None = None,
+    bind: IPv4Address | None = None, port: int = 8443,
+) -> FastAPI:
     store = Store(directory, network)
     ca_certificate = load_ca_certificate(ca_path) if ca_path is not None else None
+    agent_url = f"https://{bind}:{port}" if bind is not None else None
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = store
     templates = Jinja2Templates(directory=HERE / "templates")
@@ -168,7 +176,8 @@ def create_app(directory: Path, network: IPv4Network, *, ca_path: Path | None = 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         return templates.TemplateResponse(
-            request=request, name="index.html", context={"ca_available": ca_certificate is not None},
+            request=request, name="index.html",
+            context={"ca_available": ca_certificate is not None, "agent_url": agent_url},
         )
 
     @app.get(f"{API_PREFIX}/ca-certificate")
@@ -238,7 +247,10 @@ def create_app(directory: Path, network: IPv4Network, *, ca_path: Path | None = 
         return {"ok": True}
 
     @app.post(f"{API_PREFIX}/enrollment-code")
-    def enrollment_code(row=Depends(admin_edit)):
+    def enrollment_code(values: EnrollmentCodeRequest | None = None, row=Depends(edit)):
+        if values is not None and values.automatic_address:
+            return {"code": store.create_code(AUTOMATIC_ENROLLMENT)}
+        admin_session(row)
         return {"code": store.create_code("enroll")}
 
     @app.post(f"{API_PREFIX}/pair")
@@ -271,8 +283,12 @@ def create_app(directory: Path, network: IPv4Network, *, ca_path: Path | None = 
         return {"ok": True}
 
     @app.post(f"{API_PREFIX}/agents/enroll", status_code=201)
-    def enroll(values: Enrollment):
-        return store.enroll(values.code, values.name)
+    def enroll(request: Request, values: Enrollment):
+        peer = request.client.host if request.client else None
+        if bind is not None and peer == str(bind) and not network.is_loopback:
+            # A same-host proxy connects from the coordinator's own VPN address.
+            peer = None
+        return store.enroll(values.code, values.name, peer=peer)
 
     @app.post(f"{API_PREFIX}/agents/pairing-code")
     def pairing_code(identity=Depends(agent)):

@@ -6,14 +6,14 @@ import tarfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from ipaddress import IPv4Network
+from ipaddress import IPv4Address, IPv4Network
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from mcmp.minecraft import Minecraft, MinecraftError
-from mcmp.protocol import CONSOLE_PAGE, OFFLINE_AFTER, Job
+from mcmp.protocol import CONSOLE_PAGE, OFFLINE_AFTER, Job, token_digest
 from mcmp.snapshots import InvalidSnapshot, create_archive, inspect_archive
 from mcmp.web import create_app
 
@@ -130,6 +130,83 @@ def test_admin_and_user_can_download_ca_before_pairing(tmp_path, certificates):
             assert response.headers["Content-Disposition"] == 'attachment; filename="minecraft-ca.pem"'
             assert response.headers["Cache-Control"] == "no-store"
             assert response.content == ca_path.read_bytes()
+
+
+@pytest.mark.parametrize("role", ("admin", "user"))
+def test_vpn_self_service_enrollment(tmp_path, certificates, role):
+    vpn = IPv4Network("10.42.0.0/24")
+    app = create_app(
+        tmp_path / "coordinator", vpn, ca_path=certificates / "ca.pem",
+        bind=IPv4Address("10.42.0.1"), port=8444,
+    )
+    app.state.store.add_account("admin", PASSWORD)
+    with TestClient(app, base_url="https://mc.home.arpa") as browser, TestClient(
+        app, base_url="https://10.42.0.1:8444", client=("10.42.0.18", 50000),
+    ) as agent:
+        sign_in(browser)
+        configure(browser)
+        if role == "user":
+            assert browser.put(f"{API}/accounts/user", json={"password": USER_PASSWORD}).status_code == 200
+            sign_in(browser, "user", USER_PASSWORD)
+        assert 'id="device-enrollment"' in browser.get("/").text
+        assert "./scripts/deploy-agent.sh --url https://10.42.0.1:8444" in browser.get("/").text
+        assert browser.get(f"{API}/ca-certificate").status_code == 200
+
+        registration = f"{API}/enrollment-code"
+        options = {"automatic_address": True}
+        assert agent.post(registration, json=options).status_code == 401
+        assert browser.post(registration, json=options, headers={"X-CSRF-Token": ""}).status_code == 403
+        assert browser.post(registration, json=options, headers={"Origin": "https://otro.example"}).status_code == 403
+        if role == "user":
+            assert browser.post(registration, json={"automatic_address": False}).status_code == 403
+        code = browser.post(registration, json=options).raise_for_status().json()["code"]
+
+        payload = {"code": code, "name": "PC por VPN", "address": "10.42.0.70"}
+        response = agent.post(f"{API}/agents/enroll", json=payload, headers={"X-Forwarded-For": "10.42.0.80"})
+        assert response.status_code == 201
+        identity = response.json()
+        assert agent.post(f"{API}/agents/enroll", json=payload).status_code == 400
+
+        auth = {"Authorization": f'Bearer {identity["token"]}'}
+        pairing = agent.post(f"{API}/agents/pairing-code", headers=auth).raise_for_status().json()
+        assert browser.post(f"{API}/pair", json=pairing).status_code == 200
+        assert browser.post(f"{API}/pair", json=pairing).status_code == 400
+        assert agent.post(f"{API}/agents/poll", headers=auth).status_code == 200
+        started = browser.post(f"{API}/start")
+        assert started.status_code == 202
+        run = started.json()
+        assert run["paired"] == identity["id"]
+        assert run["agents"][0]["address"] == "10.42.0.18"
+        assert event(agent, run["run_id"], auth, "claim").status_code == 200
+        assert event(agent, run["run_id"], auth, "ready").status_code == 200
+        assert browser.get(f"{API}/status").json()["run"]["endpoint"] == "10.42.0.18:25565"
+
+
+def test_vpn_enrollment_rejects_proxy_and_outside_peer_without_consuming_code(tmp_path):
+    vpn = IPv4Network("10.42.0.0/24")
+    app = create_app(tmp_path / "coordinator", vpn, bind=IPv4Address("10.42.0.1"))
+    store = app.state.store
+    store.add_account("admin", PASSWORD)
+    with TestClient(app, base_url="https://mc.home.arpa") as browser:
+        sign_in(browser)
+        registration = f"{API}/enrollment-code"
+        options = {"automatic_address": True}
+        expired = browser.post(registration, json=options).raise_for_status().json()
+        code = browser.post(registration, json=options).raise_for_status().json()
+        with store.connection(write=True) as db:
+            db.execute("UPDATE codes SET expires = 0 WHERE digest = ?", (token_digest(expired["code"]),))
+        body = {**code, "name": "PC por VPN"}
+        for source in ("192.0.2.4", "10.42.0.1"):
+            with TestClient(app, base_url="https://10.42.0.1:8443", client=(source, 50000)) as agent:
+                response = agent.post(
+                    f"{API}/agents/enroll", json=body, headers={"X-Forwarded-For": "10.42.0.5"},
+                )
+                assert response.status_code == 400
+                assert "URL HTTPS directa" in response.json()["detail"]
+        assert browser.get(f"{API}/status").json()["agents"] == []
+        with TestClient(app, base_url="https://10.42.0.1:8443", client=("10.42.0.5", 50000)) as agent:
+            assert agent.post(f"{API}/agents/enroll", json={**expired, "name": body["name"]}).status_code == 400
+            assert agent.post(f"{API}/agents/enroll", json=body).status_code == 201
 
 
 @pytest.mark.parametrize("kind", ("missing", "invalid", "site", "private-key", "multiple"))

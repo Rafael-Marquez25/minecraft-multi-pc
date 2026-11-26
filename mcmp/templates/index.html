@@ -95,33 +95,42 @@
             <summary>Certificado HTTPS</summary>
             <div class="stack">
               <a href="{{ url_for('download_ca_certificate') }}" download>Descargar CA del panel</a>
-              <p class="muted">Importa el archivo en «Autoridades» del navegador en el PC que necesite confiar en el panel.</p>
+              <p class="muted">Usa este archivo con el script del agente. Si el panel usa esta CA privada, impórtala también en «Autoridades» del navegador.</p>
             </div>
           </details>
           {% endif %}
+          <details id="device-enrollment">
+            <summary>Registrar un PC Linux</summary>
+            <div class="stack">
+              {% if agent_url and ca_available %}
+              <p class="muted">En el PC anfitrión, ejecuta este comando desde el clon y ajusta la ruta al certificado descargado.</p>
+              <code>./scripts/deploy-agent.sh --url {{ agent_url }} --ca ./minecraft-ca.pem</code>
+              {% endif %}
+              <p class="muted">Genera un código cuando el script te lo pida y pégalo en la terminal del PC.</p>
+              <label class="check" data-admin-only hidden>
+                <input id="enrollment-manual" type="checkbox"> Configurar la IPv4 VPN manualmente
+              </label>
+              <button id="enrollment" type="button">Generar código de registro</button>
+              <div id="enrollment-wrap" hidden>
+                <div class="token-field">
+                  <code id="enrollment-code"></code>
+                  <button id="copy-enrollment" type="button">Copiar</button>
+                </div>
+                <p class="enrollment-expiry">Válido durante 10 minutos y para un solo registro.</p>
+              </div>
+              <p id="enrollment-feedback" class="feedback device-feedback" role="status"></p>
+            </div>
+          </details>
           <details id="device-pair">
             <summary>Vincular navegador</summary>
             <form id="pair-form" class="stack">
-              <p id="pair-help" class="muted">Genera el código en este PC con <code>mcmp agent pair</code>. Para la prueba local, ejecuta <code>./scripts/deploy-local.sh pair</code> en otra terminal.</p>
+              <p id="pair-help" class="muted">Pega el código que muestra el agente. Para generar otro, ejecuta <code>./scripts/deploy-agent.sh pair</code> en el PC anfitrión. En la prueba local, usa <code>./scripts/deploy-local.sh pair</code>.</p>
               <div>
                 <label>Código de vinculación<input name="code" maxlength="128" spellcheck="false" autocomplete="off" aria-describedby="pair-help pair-feedback" required></label>
                 <p id="pair-feedback" class="feedback device-feedback" role="status"></p>
               </div>
               <button>Vincular</button>
             </form>
-          </details>
-          <details data-admin-only hidden>
-            <summary>Registrar un PC Linux</summary>
-            <p class="muted">Genera un código y pégalo en la terminal del PC cuando <code>mcmp agent enroll</code> lo pida.</p>
-            <button id="enrollment" type="button">Generar código de registro</button>
-            <div id="enrollment-wrap" hidden>
-              <div class="token-field">
-                <code id="enrollment-code"></code>
-                <button id="copy-enrollment" type="button">Copiar</button>
-              </div>
-              <p class="enrollment-expiry">Válido durante 10 minutos y para un solo registro.</p>
-            </div>
-            <p id="enrollment-feedback" class="feedback device-feedback" role="status"></p>
           </details>
         </section>
       </div>
